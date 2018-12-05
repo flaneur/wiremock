@@ -1,0 +1,59 @@
+node {
+
+	// variables
+	def app
+	def gitCommit
+	def name = "wiremock"
+	def namespaceList = NAMESPACE.split(',')
+	def serviceList = SERVICE.split(',')
+	def threads = THREADS
+	def git_sync_branch = GIT_SYNC_BRANCH
+	def project = "test"
+	def dockerRegistry = "registry"
+	def gitCredentials = "git-key"
+	def kubectl
+	def workspace = pwd()
+
+	stage("Checkout repos") {
+		// Checkout wiremock repository
+		checkout scm
+
+		// Checkout platform repository
+		def platformRepository = "ssh://git@bitbucket:7999/platform.git"
+		def platformBranch = "*/master"
+		def platformPath = "${workspace}/platform"
+		checkout([$class: 'GitSCM', branches: [[name: platformBranch]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'CleanBeforeCheckout'],[$class: 'RelativeTargetDirectory', relativeTargetDir: "platform"]], submoduleCfg: [], userRemoteConfigs: [[ credentialsId: gitCredentials, url: platformRepository ]]])
+
+		// Kubectl
+		def k8sConfigFile = "${workspace}/platform/jenkins/k8s.conf"
+		kubectl = "kubectl --kubeconfig=${k8sConfigFile}"
+	}
+
+	stage("Create deployment files and deploy") {
+
+		// k8s deployment descriptor path
+		def k8sDeploymentFile = "${workspace}/deploy/k8s.deployment.yml"
+
+		// deployment for loop 
+		for (int i=0; i < namespaceList.length; i++) {
+			for (int j=0; j < serviceList.length; j++) {
+		def namespace = namespaceList[i].trim()
+			def service = serviceList[j].trim()
+			
+		// temp deployment descriptor
+		k8sDeploymentFileTMP = "${k8sDeploymentFile}.${namespace}.${service}"
+
+		sh "cp ${k8sDeploymentFile} ${k8sDeploymentFileTMP}"
+		if (namespace=="mocked") {
+			sh "sed -i 's/_GITBRANCH_/master/g' ${k8sDeploymentFileTMP}"
+		} else {
+			sh "sed -i 's/_GITBRANCH_/${git_sync_branch}/g' ${k8sDeploymentFileTMP}"
+		}
+		sh "sed -i 's/_NAMESPACE_/${namespace}/g' ${k8sDeploymentFileTMP}"
+		sh "sed -i 's/_SERVICENAME_/${service}/g' ${k8sDeploymentFileTMP}"
+		sh "sed -i 's/_THREADS_/${threads}/g' ${k8sDeploymentFileTMP}"
+		sh "${kubectl} apply -f ${k8sDeploymentFileTMP}"
+			}
+		}
+	}					        
+}

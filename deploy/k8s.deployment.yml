@@ -1,0 +1,126 @@
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: wiremock-_SERVICENAME_
+  namespace: _NAMESPACE_
+spec:
+  replicas: 1
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: wiremock-_SERVICENAME_
+    spec:
+      containers:
+      # git-sync    
+      - image: registry/git-sync/git-sync-amd64:2.0.8
+        name: git-sync-_SERVICENAME_
+        command:
+          - "sh"
+          - "-c"
+          - "/bin/sleep 90 && ./git-sync"
+        env:
+          - name: "GIT_SYNC_REPO"
+            value: "ssh://git@bitbucket:7999/wiremock-mappings.git"
+          - name: "GIT_SYNC_BRANCH"
+            value: "_GITBRANCH_"
+          - name: "GIT_SYNC_DEST"
+            value: "mappings"
+          - name: "GIT_SYNC_SSH"
+            value: "true"
+          - name: "GIT_SYNC_MAX_SYNC_FAILURES"
+            value: "10"
+          - name: "GIT_SYNC_DEPTH"
+            value: "1"
+          - name: "WEBHOOK_ENABLED"
+            value: "true"
+          - name: "WEBHOOK_URL"
+            value: "http://wiremock-_SERVICENAME_._NAMESPACE_.io/__admin/shutdown"
+          - name: "WEBHOOK_TIMEOUT"
+            value: "10"
+        volumeMounts:
+          - name: git-repo-_SERVICENAME_
+            mountPath: "/git"
+          - name: config-volume
+            mountPath: /etc/git-secret
+      
+      #wiremock
+      - image: registry/wiremock/wiremock:2.0
+        name: wiremock-_SERVICENAME_
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "1.5Gi"
+            cpu: "0.5"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /__admin
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 20
+        env:
+        - name: SERVICE
+          value: _SERVICENAME_
+        - name: THREADS
+          value: "_THREADS_"
+        volumeMounts:
+          - name: git-repo-_SERVICENAME_
+            mountPath: "/repo"
+            readOnly: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      volumes:
+      - name: git-repo-_SERVICENAME_
+        emptyDir: {}
+      - name: config-volume
+        configMap:
+          name: cm-git-key
+          defaultMode: 256
+---
+apiVersion: v1
+kind: "Service"
+metadata:
+  name: wiremock-_SERVICENAME_
+  namespace: _NAMESPACE_
+  labels:
+    app: wiremock-_SERVICENAME_
+spec:
+  type: "ClusterIP"
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: wiremock-_SERVICENAME_
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: wiremock-_SERVICENAME_
+  namespace: _NAMESPACE_
+  annotations:
+    ingress.kubernetes.io/enable-cors: "true"
+spec:
+  rules:
+  - host: wiremock-_SERVICENAME_._NAMESPACE_.io
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: wiremock-_SERVICENAME_
+          servicePort: 80

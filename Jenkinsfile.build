@@ -1,0 +1,19 @@
+node {
+	def app
+	def name = "wiremock"
+	def dockerRegistry = "registry"
+
+	stage("Checkout") {
+		checkout scm
+	}
+
+	stage("Build") {
+		app = docker.build("${dockerRegistry}/${name}:${WIREMOCK_VERSION}.${env.BUILD_ID}", "--build-arg WIREMOCK_VERSION=$WIREMOCK_VERSION .")
+	}
+
+	stage("Push to Registry") {
+		app.push "${WIREMOCK_VERSION}.${env.BUILD_ID}"
+		app.push "latest"
+		echo "Docker Image: ${dockerRegistry}/${WIREMOCK_VERSION}.${env.BUILD_ID}"
+	}
+}
